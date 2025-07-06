@@ -181,12 +181,12 @@ def finalize_data(session_df, pos_df, driver_df, laps_df):
         .rename(columns={'laps_completed': 'max_laps'})
     )
     lap_counts = pd.merge(lap_counts, max_laps_per_session, on='session_key', how='left')
-    lap_counts['DNF'] = lap_counts['laps_completed'] < lap_counts['max_laps']
+    lap_counts['dnf'] = lap_counts['laps_completed'] < lap_counts['max_laps']
 
     final = pd.merge(final_pos, starting_pos, on=['session_key', 'driver_number'], how='left')
     final = pd.merge(final, session_df, on='session_key', how='left')
     final['position_change'] = final['starting_position'] - final['final_position']
-    final = pd.merge(final, lap_counts[['session_key', 'driver_number', 'laps_completed', 'DNF']],
+    final = pd.merge(final, lap_counts[['session_key', 'driver_number', 'laps_completed', 'dnf']],
                      on=['session_key', 'driver_number'], how='left')
     
     return final.drop_duplicates()

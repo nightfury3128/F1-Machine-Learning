@@ -950,10 +950,22 @@ def main():
         print(f"✗ Error in race results calculation: {e}")
     
     print("\n🎉 F1 Data Pipeline completed!")
+""""
+
+I made a mistake while importing the race results and I did not want to import everything again so well here you go, in case you are messing around with the database and want to import more training data
 
 years = [2025]
 session_names = ['Race']
     
 print("\n📊 Extracting data...")
 extracted_data = extract(years, session_names)
-insert_pitstops(extracted_data['pit_df'])
+insert_results(results_df = finalize_data(
+            extracted_data['session_df'],
+            extracted_data['pos_df'],
+            extracted_data['driver_df'],
+            extracted_data['laps_df']
+        ))
+        """
+
+if __name__ == "__main__":
+    main()
