@@ -925,7 +925,16 @@ def main():
     if insert_laps(extracted_data['laps_df']):
         print("✓ Laps inserted successfully")
     
-    # 5. Calculate and insert race results
+    # 5. Insert weather data
+    if insert_weather(extracted_data['weather_df']):
+        print("✓ Weather data inserted successfully")
+    
+    # 6. Insert pitstops
+    if insert_pitstops(extracted_data['pit_df']):
+        print("✓ Pitstops inserted successfully")
+    
+
+    # 7. Calculate and insert race results
     print("\n🏆 Calculating race results...")
     try:
         results_df = finalize_data(
