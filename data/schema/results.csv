@@ -1,0 +1,4 @@
+id,session_key,driver_number,starting_position,final_position,position_change,laps_completed,dnf
+1,12345,44,2,1,1,58,false
+2,12345,1,1,2,-1,58,false
+3,12345,16,4,3,1,58,false

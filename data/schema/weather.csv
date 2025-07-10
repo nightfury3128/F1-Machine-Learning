@@ -1,0 +1,4 @@
+id,session_key,air_temperature,track_temperature,wind_direction,wind_speed,humidity,rainfall,date
+1,12345,24.5,45.2,180,10.3,65.0,0.0,2025-03-15T14:00:00
+2,12345,25.1,46.7,185,9.8,63.5,0.0,2025-03-15T15:00:00
+3,12346,22.3,38.5,90,15.2,75.0,0.2,2025-05-25T14:00:00

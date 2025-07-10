@@ -1,0 +1,4 @@
+id,session_key,year,circuit_key,location,session_type,circuit_name
+1,12345,2025,10,Melbourne,Race,Albert Park
+2,12346,2025,20,Monaco,Race,Circuit de Monaco
+3,12347,2025,30,Silverstone,Race,Silverstone Circuit

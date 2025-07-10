@@ -867,6 +867,23 @@ def test_connection():
         print(f"✗ Supabase connection failed: {e}")
         return False
 
+def check_existing_sessions(session_keys):
+    """Check which sessions already exist in the database"""
+    try:
+        if not session_keys:
+            return []
+        
+        # Query database for all the provided session keys
+        response = supabase.table('sessions').select('session_key').in_('session_key', session_keys).execute()
+        
+        # Extract session_keys from response
+        existing_keys = [record.get('session_key') for record in response.data]
+        print(f"Found {len(existing_keys)} existing sessions in database")
+        return existing_keys
+    except Exception as e:
+        print(f"⚠️ Error checking existing sessions: {e}")
+        return []
+
 def main():
     """Main function to extract data and insert into database"""
     print("🏁 Starting F1 Data Pipeline...")
@@ -883,8 +900,8 @@ def main():
         check_table_schema(table)
     
     # Extract all data using data.py
-    years = [2025]
-    session_names = ['Race']
+    years = [2025,2024,2023]
+    session_names = ['Race', 'Qualifying']
     
     print("\n📊 Extracting data...")
     extracted_data = extract(years, session_names)
@@ -898,17 +915,40 @@ def main():
     print(f"✓ Extracted {len(extracted_data['driver_df'])} drivers")
     print(f"✓ Extracted {len(extracted_data['laps_df'])} laps")
     
-    print (extracted_data['session_df'].head())
-    extracted_data['session_df'].to_csv('session_df.csv', index=False)
+    # Check for existing sessions before inserting
+    print("\n🔍 Checking for existing sessions in the database...")
+    existing_session_keys = check_existing_sessions(extracted_data['session_df']['session_key'].tolist())
     
-    # Insert data into database in proper order
-    print("\n💾 Inserting data into Supabase...")
+    # Filter out sessions that already exist
+    new_sessions = extracted_data['session_df'][~extracted_data['session_df']['session_key'].isin(existing_session_keys)]
+    print(f"✓ Found {len(new_sessions)} new sessions to insert")
     
-    # 1. Insert sessions first (required for foreign keys)
-    if insert_sessions(extracted_data['session_df']):
-        print("✓ Sessions inserted successfully")
+    if new_sessions.empty:
+        print("No new sessions to insert. Skipping session insertion.")
     else:
-        print("✗ Failed to insert sessions. Stopping pipeline.")
+        print (new_sessions.head())
+        new_sessions.to_csv('session_df.csv', index=False)
+        
+        # Insert data into database in proper order
+        print("\n💾 Inserting data into Supabase...")
+        
+        # 1. Insert sessions first (required for foreign keys)
+        if insert_sessions(new_sessions):
+            print("✓ Sessions inserted successfully")
+        else:
+            print("✗ Failed to insert sessions. Stopping pipeline.")
+            return
+    
+    # Filter related data to only include new sessions
+    if not new_sessions.empty:
+        new_session_keys = new_sessions['session_key'].tolist()
+        filtered_pos_df = extracted_data['pos_df'][extracted_data['pos_df']['session_key'].isin(new_session_keys)]
+        filtered_laps_df = extracted_data['laps_df'][extracted_data['laps_df']['session_key'].isin(new_session_keys)]
+        filtered_weather_df = extracted_data['weather_df'][extracted_data['weather_df']['session_key'].isin(new_session_keys)] if 'weather_df' in extracted_data else pd.DataFrame()
+        filtered_pit_df = extracted_data['pit_df'][extracted_data['pit_df']['session_key'].isin(new_session_keys)] if 'pit_df' in extracted_data else pd.DataFrame()
+    else:
+        # If all sessions already exist, skip further processing
+        print("All sessions already exist in the database. Skipping further processing.")
         return
     
     # 2. Insert drivers
@@ -916,32 +956,31 @@ def main():
         print("✓ Drivers inserted successfully")
     
     # 3. Insert positions (depends on sessions)
-    if insert_positions(extracted_data['pos_df']):
+    if insert_positions(filtered_pos_df):
         print("✓ Positions inserted successfully")
     else:
         print("⚠️  Positions insertion failed, but continuing with other data...")
     
     # 4. Insert laps (depends on sessions)
-    if insert_laps(extracted_data['laps_df']):
+    if insert_laps(filtered_laps_df):
         print("✓ Laps inserted successfully")
     
     # 5. Insert weather data
-    if insert_weather(extracted_data['weather_df']):
+    if not filtered_weather_df.empty and insert_weather(filtered_weather_df):
         print("✓ Weather data inserted successfully")
     
     # 6. Insert pitstops
-    if insert_pitstops(extracted_data['pit_df']):
+    if not filtered_pit_df.empty and insert_pitstops(filtered_pit_df):
         print("✓ Pitstops inserted successfully")
-    
 
     # 7. Calculate and insert race results
     print("\n🏆 Calculating race results...")
     try:
         results_df = finalize_data(
-            extracted_data['session_df'],
-            extracted_data['pos_df'],
+            new_sessions,
+            filtered_pos_df,
             extracted_data['driver_df'],
-            extracted_data['laps_df']
+            filtered_laps_df
         )
         
         if insert_results(results_df):
@@ -950,6 +989,7 @@ def main():
         print(f"✗ Error in race results calculation: {e}")
     
     print("\n🎉 F1 Data Pipeline completed!")
+
 """"
 
 I made a mistake while importing the race results and I did not want to import everything again so well here you go, in case you are messing around with the database and want to import more training data

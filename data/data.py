@@ -80,7 +80,7 @@ def extract(years, session_names):
     print("Extracting session data...")
     session_data = multiple_sessions(years, session_names)
     session_df = pd.DataFrame([
-    {k: item[k] for k in ['year', 'session_key', 'circuit_key', 'location', 'session_type','circuit_name'] if k in item}
+    {k: item[k] for k in ['year', 'session_key', 'circuit_key', 'location', 'session_type'] if k in item}
     for item in session_data
 ])
 
