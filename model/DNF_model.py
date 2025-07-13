@@ -1,132 +1,90 @@
+from utils import get_table_df
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-from utils import weather_df, results_df, drivers_df, laps_df, sessions_df, pitstops_df, positions_df
+from sklearn.preprocessing import StandardScaler
+import tensorflow as tf
+from tensorflow import keras
+import joblib
+
+# 1. Get first 10,000 sessions
+sessions_df = get_table_df("sessions").drop(columns=['id']).sort_values("session_key").head(10000)
+session_keys = sessions_df['session_key'].unique().tolist()
+
+# 2. Get other tables and filter to these session keys
+positions_df = get_table_df("positions").drop(columns=['id'])
+positions_df = positions_df[positions_df['session_key'].isin(session_keys)]
+
+weather_df = get_table_df("weather").drop(columns=['id'])
+weather_df = weather_df[weather_df['session_key'].isin(session_keys)]
+
+results_df = get_table_df("results").drop(columns=['id'])
+results_df = results_df[results_df['session_key'].isin(session_keys)]
+
+pitstops_df = get_table_df("pitstops").drop(columns=['id'])
+pitstops_df = pitstops_df[pitstops_df['session_key'].isin(session_keys)]
+
+drivers_df = get_table_df("drivers").drop(columns=['id'])
+
+postions_df = get_table_df("positions").drop(columns=['id'])
+postions_df = postions_df[postions_df['session_key'].isin(session_keys)]
+
+
+df = pd.merge(sessions_df, weather_df, on='session_key', how='left')
+df = pd.merge(df, results_df, on='session_key', how='left')
+df = pd.merge(df, drivers_df, on='driver_number', how='left')
+df = pd.merge(df, postions_df, on=['session_key','driver_number'], how='left')
+
 
 feature_cols = [
-    'driver_number_x',
-    'starting_position',
-    'pit_duration',
-    'circuit_key',
-    'location',
-    'session_type',
-    'rainfall',
-    'air_temperature',
-    'track_temperature',
-    'wind_direction',
-    'wind_speed',
+    'year', 'circuit_key', 'location', 'air_temperature', 'track_temperature',
+    'wind_direction', 'wind_speed', 'humidity', 'rainfall',
+    'starting_position', 'position_change', 'laps_completed',
+    'team_name', 'full_name'
 ]
 
-def data():
-    dnf_data = pd.merge(results_df, pitstops_df, on='session_key', how='left')
-    dnf_data = pd.merge(dnf_data, sessions_df, on='session_key', how='left')
-    dnf_data = pd.merge(dnf_data, weather_df, on='session_key', how='left')
-    return dnf_data
+df = df.drop_duplicates() # This is needed since I think the postions table has a lot of duplicates and I don't have the energy to fix it 
 
-def train():
-    dnf_data = data()
-    dnf_data = dnf_data.dropna(subset=['driver_number_x', 'session_key', 'laps_completed', 'dnf'])
-    dnf_data['dnf'] = dnf_data['dnf'].astype(int)
+df.to_csv("merged_data.csv", index=False)
 
-    X = dnf_data[feature_cols]
-    y = dnf_data['dnf']
+# Ignore one session_key completely from the training data for testing in the model with actual data for my own testing
+SESSION_KEY_TO_IGNORE = '9693' 
+df = df[df['session_key'] != SESSION_KEY_TO_IGNORE]
 
-    # One-hot encode categorical columns
-    X = pd.get_dummies(X)
+df = df.dropna(subset=feature_cols + ['final_position'])
+print("Dataframe shape after merging:", df.shape)
+X = pd.get_dummies(df[feature_cols], drop_first=True)
+joblib.dump(X.columns.tolist(), "model_columns.pkl")
 
-    # Split train/test
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, stratify=y, test_size=0.5, random_state=42
-    )
+# Multi-class classification: predict final_position (shift to zero-based)
+y = df['final_position'].astype(int) - 1
+num_classes = y.nunique()
+print(f"Number of position classes: {num_classes}")
 
-    # Train model
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
+print("Splitting start")
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
+print("Splitting done")
 
-    # Evaluate
-    y_pred = model.predict(X_test)
-    print("Accuracy:", accuracy_score(y_test, y_pred))
-    print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
-    print("Classification Report:\n", classification_report(y_test, y_pred))
+# Build model for multi-class classification
+model = keras.Sequential([
+    keras.layers.Dense(64, activation='relu', input_shape=(X_train.shape[1],)),
+    keras.layers.Dense(32, activation='relu'),
+    keras.layers.Dense(num_classes, activation='softmax')
+])
+print("Model built")
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+print("Model compiled")
+print("Starting training")
+# Train
+model.fit(X_train, y_train, epochs=2, batch_size=100, validation_split=0.2)
+print("Model trained")
+# Save the model
+model.save("prediction.h5")
+print("Model saved to prediciton.h5")
+# Evaluate
+loss, accuracy = model.evaluate(X_test, y_test)
+print(f"Test accuracy: {accuracy:.2f}")
 
-    # Return model and training columns
-    return model, X_train.columns
-
-model, train_columns = train()
-
-# Static race info
-race_info = {
-    'circuit_key': 'silverstone',
-    'location': 'silverstone',
-    'session_type': 'race'
-}
-
-# Static weather
-weather_forecast = {
-    'rainfall': 0.0,  
-    'air_temperature': 18.5,
-    'track_temperature': 18.5,  # assume track temp ~= air temp (or adjust)
-    'wind_speed': 18.5,
-    'wind_direction': 331,
-}
-
-drivers = [
-    {'driver_number_x': 1, 'starting_position': 1, 'driver_name': 'M. Verstappen'},
-    {'driver_number_x': 81, 'starting_position': 2, 'driver_name': 'O. Piastri'},
-    {'driver_number_x': 4, 'starting_position': 3, 'driver_name': 'L. Norris'},
-    {'driver_number_x': 63, 'starting_position': 4, 'driver_name': 'G. Russell'},
-    {'driver_number_x': 44, 'starting_position': 5, 'driver_name': 'L. Hamilton'},
-    {'driver_number_x': 16, 'starting_position': 6, 'driver_name': 'C. Leclerc'},
-    {'driver_number_x': 12, 'starting_position': 7, 'driver_name': 'A.K. Antonelli'},
-    {'driver_number_x': 87, 'starting_position': 8, 'driver_name': 'O. Bearman'},
-    {'driver_number_x': 14, 'starting_position': 9, 'driver_name': 'F. Alonso'},
-    {'driver_number_x': 10, 'starting_position': 10, 'driver_name': 'P. Gasly'},
-    {'driver_number_x': 55, 'starting_position': 11, 'driver_name': 'C. Sainz Jr.'},
-    {'driver_number_x': 22, 'starting_position': 12, 'driver_name': 'Y. Tsunoda'},
-    {'driver_number_x': 6, 'starting_position': 13, 'driver_name': 'I. Hadjar'},
-    {'driver_number_x': 23, 'starting_position': 14, 'driver_name': 'A. Albon'},
-    {'driver_number_x': 31, 'starting_position': 15, 'driver_name': 'E. Ocon'},
-    {'driver_number_x': 30, 'starting_position': 16, 'driver_name': 'L. Lawson'},
-    {'driver_number_x': 5, 'starting_position': 17, 'driver_name': 'G. Bortoleto'},
-    {'driver_number_x': 18, 'starting_position': 18, 'driver_name': 'L. Stroll'},
-    {'driver_number_x': 27, 'starting_position': 19, 'driver_name': 'N. Hülkenberg'},
-    {'driver_number_x': 43, 'starting_position': 20, 'driver_name': 'F. Colapinto'}
-]
-
-
-
-df = pd.DataFrame(drivers)
-
-df['pit_duration'] = 0  # no pit duration yet
-df['circuit_key'] = race_info['circuit_key']
-df['location'] = race_info['location']
-df['session_type'] = race_info['session_type']
-
-df['rainfall'] = weather_forecast['rainfall']
-df['air_temperature'] = weather_forecast['air_temperature']
-df['track_temperature'] = weather_forecast['track_temperature']
-df['wind_speed'] = weather_forecast['wind_speed']
-df['wind_direction'] = weather_forecast['wind_direction']
-
-
-X = df[feature_cols]
-
-X = pd.get_dummies(X)
-
-dnf_data = data()
-dnf_data = dnf_data.dropna(subset=feature_cols + ['dnf'])
-dnf_data['dnf'] = dnf_data['dnf'].astype(int)
-X_train = dnf_data[feature_cols]
-X_train = pd.get_dummies(X_train)
-
-# Align columns: add missing columns with 0
-X = X.reindex(columns=X_train.columns, fill_value=0)
-
-# Predict
-df['dnf_prediction'] = model.predict(X)
-
-# Print who is predicted to DNF
-dnf_drivers = df[df['dnf_prediction'] == 1]
-print("Predicted to DNF:")
-print(dnf_drivers[['driver_name', 'starting_position']])
+print(df.drop_duplicates())
